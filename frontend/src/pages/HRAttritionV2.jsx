@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { api } from "../api";
+import { ShapVisualization } from "../components/ShapExplainer";
 
 const COLORS = {
   critical: "#E63946",
@@ -992,9 +993,9 @@ export default function HRAttritionV2() {
   const [correlationData, setCorrelationData] = useState(null);
   const [terminationReasons, setTerminationReasons] = useState(null);
   const [selected, setSelected] = useState(null);
+    const [shap, setShap] = useState(null);
+    const [recommendations, setRecommendations] = useState(null);
   const [detailLoading, setDetailLoading] = useState(false);
-  const [shap, setShap] = useState(null);
-  const [recommendations, setRecommendations] = useState(null);
   const [activeOnly, setActiveOnly] = useState(true);
   const [statusFilter, setStatusFilter] = useState("all");
   const [departmentFilter, setDepartmentFilter] = useState("all");
@@ -1157,6 +1158,7 @@ export default function HRAttritionV2() {
           {selected && (
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 18 }}>
               <ShapExplainerPanel shap={shap} />
+              <ShapVisualization shap={shap} />
               <RecommendationsPanel recommendations={recommendations} />
             </div>
           )}
