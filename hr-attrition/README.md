@@ -38,3 +38,7 @@ Le code gère explicitement:
 - format 2D `(n_samples, n_features)`
 
 `models/shap_values.npy` est toujours sauvegardé en 2D.
+
+## Documentation conformité prête à usage
+
+- Voir `MODEL_CARD_AI_ACT.md` pour la version complète (objectif, données, performances, limites, AI Act, cyber, frugalité).
