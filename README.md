@@ -1,11 +1,11 @@
-# 🛡️ CyberGuard AI — HR Attrition Prediction with Explainable AI
+# 🛡️HR Attrition Prediction with Explainable AI (Team 20)
 
 > **Hackathon Project** — Explainability & Ethics in AI  
-> Version `2.1.0` | FastAPI + React + scikit-learn | Docker-ready
+> FastAPI + React + scikit-learn | Docker
 
 ---
 
-## 🎯 Objectives
+## Objectives
 
 CyberGuard AI is a **production-ready HR intelligence platform** that predicts employee attrition risk using **explainable machine learning**. The project explores the intersection of:
 
@@ -18,7 +18,7 @@ The goal is to demonstrate that AI can be **powerful AND responsible** — assis
 
 ---
 
-## 🔭 Scope
+## Scope
 
 | In Scope | Out of Scope |
 |---|---|
@@ -33,9 +33,9 @@ The system is designed as a **decision-support tool**: it informs HR professiona
 
 ---
 
-## 👤 Personas
+## Personas
 
-### 1. 🧑‍💼 HR Manager — *Marie*
+### 1. HR Manager — *Marie*
 > "I need to know which employees are at risk of leaving and what I can do about it."
 
 - Uses the **employee list** sorted by risk score
@@ -43,7 +43,7 @@ The system is designed as a **decision-support tool**: it informs HR professiona
 - Runs **what-if simulations** before proposing a retention plan
 - Accesses **RGPD audit** reports to stay compliant
 
-### 2. 👩‍💻 Data Scientist — *Lucas*
+### 2. Data Scientist — *Lucas*
 > "I want to understand the model's behavior and check for hidden biases."
 
 - Uses the **model explainability endpoint** to review feature importances
@@ -51,7 +51,7 @@ The system is designed as a **decision-support tool**: it informs HR professiona
 - Monitors **anomaly detection** for data quality issues
 - Reviews correlation matrix to evaluate feature relevance
 
-### 3. 🏢 HR Director — *Sophie*
+### 3. HR Director — *Sophie*
 > "I need to ensure our AI tools are fair, legal, and aligned with company values."
 
 - Consults the **EU AI Act compliance audit** per employee
@@ -61,7 +61,7 @@ The system is designed as a **decision-support tool**: it informs HR professiona
 
 ---
 
-## 🚀 Quick Start
+## Quick Start
 
 ### Prerequisites
 - Docker & Docker Compose (recommended)
@@ -95,7 +95,7 @@ npm run dev
 
 ---
 
-## 📖 Instructions
+## Instructions
 
 ### 1. Predict Employee Attrition
 
@@ -106,7 +106,7 @@ curl http://localhost:8000/api/hr/predict/42
 
 Response includes: risk score, risk level (Low/Moderate/High/Critical), top risk factors, recommended action.
 
-### 2. Run a What-If Simulation
+### Run a What-If Simulation
 
 ```bash
 curl -X POST http://localhost:8000/api/advanced/simulate \
@@ -114,19 +114,19 @@ curl -X POST http://localhost:8000/api/advanced/simulate \
   -d '{"emp_id": 42, "interventions": [{"type": "salary", "amount": 10}]}'
 ```
 
-### 3. Audit for Bias
+### Audit for Bias
 
 ```bash
 curl http://localhost:8000/api/advanced/bias-audit
 ```
 
-### 4. Check GDPR Compliance
+### Check GDPR Compliance
 
 ```bash
 curl http://localhost:8000/api/hr/audit-rgpd/42
 ```
 
-### 5. Full AI Act Compliance Audit
+### Full AI Act Compliance Audit
 
 ```bash
 curl http://localhost:8000/api/hr/ia-act/42
@@ -134,7 +134,7 @@ curl http://localhost:8000/api/hr/ia-act/42
 
 ---
 
-## 📁 Project Structure
+## Project Structure
 
 ```
 Hackathon-Explainability-AI/
@@ -167,7 +167,7 @@ Hackathon-Explainability-AI/
 
 ---
 
-## 🔐 Security & Compliance Summary
+## Security & Compliance Summary
 
 | Requirement | Status |
 |---|---|
@@ -182,7 +182,7 @@ Hackathon-Explainability-AI/
 
 ---
 
-## 🧑‍🤝‍🧑 Team & Credits
+## Team & Credits
 
 Built with ❤️ during the **Hackathon Explainability AI**.
 
