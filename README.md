@@ -1,4 +1,4 @@
-# 🛡️ CyberGuard AI — HR Attrition Prediction with Explainable AI
+# 🛡️ CyberGuard AI — HR Attrition Prediction with Explainable AI (Team 20)
 
 > **Hackathon Project** — Explainability & Ethics in AI  
 > FastAPI + React + scikit-learn | Docker
