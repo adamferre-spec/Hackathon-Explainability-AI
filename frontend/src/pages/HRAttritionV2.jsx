@@ -22,13 +22,38 @@ function riskColor(score) {
   return COLORS.low;
 }
 
-function estimatedDeparture(status, riskScore) {
-  if (status === "Parti") return "Déjà parti";
-  if (riskScore >= 0.8) return "0-3 mois";
-  if (riskScore >= 0.65) return "3-6 mois";
-  if (riskScore >= 0.5) return "6-12 mois";
-  if (riskScore >= 0.35) return "12-18 mois";
-  return ">18 mois";
+function horizonRiskIndex(employee) {
+  let score = Number(employee?.risk_score) || 0;
+  const satisfaction = Number(employee?.satisfaction) || 0;
+  const engagement = Number(employee?.engagement) || 0;
+  const workLifeBalance = Number(employee?.work_life_balance) || 0;
+  const yearsSincePromotion = Number(employee?.years_since_last_promotion) || 0;
+  const distance = Number(employee?.distance_from_home) || 0;
+
+  if (employee?.overtime === "Yes") score += 0.08;
+  if (satisfaction <= 2) score += 0.10;
+  else if (satisfaction <= 3) score += 0.04;
+  if (engagement <= 2) score += 0.08;
+  else if (engagement <= 3) score += 0.03;
+  if (yearsSincePromotion >= 5) score += 0.10;
+  else if (yearsSincePromotion >= 3) score += 0.05;
+  if (workLifeBalance <= 2) score += 0.06;
+  if (distance > 20) score += 0.04;
+
+  return Math.max(0, Math.min(1, score));
+}
+
+function estimateDepartureForEmployee(employee) {
+  if (!employee) return "Non disponible";
+  if (employee.status === "Parti") return "Déjà parti";
+
+  const idx = horizonRiskIndex(employee);
+  if (idx >= 0.82) return "0-3 mois";
+  if (idx >= 0.68) return "3-6 mois";
+  if (idx >= 0.55) return "6-12 mois";
+  if (idx >= 0.42) return "12-18 mois";
+  if (idx >= 0.30) return "18-24 mois";
+  return ">24 mois";
 }
 
 function rate(part, total) {
@@ -161,7 +186,7 @@ function EmployeeTable({ employees, onSelect, selectedId }) {
                 <td style={{ padding: "10px 12px", color: "#8BA5BF", fontSize: 12 }}>{employee.position}</td>
                 <td style={{ padding: "10px 12px", color: employee.status === "Parti" ? COLORS.critical : COLORS.low, fontSize: 12, fontWeight: 600 }}>{employee.status}</td>
                 <td style={{ padding: "10px 12px", color: riskColor(employee.risk_score), fontSize: 12, fontWeight: 700 }}>{riskLabel(employee.risk_score)} ({Math.round(employee.risk_score * 100)}%)</td>
-                <td style={{ padding: "10px 12px", color: employee.status === "Parti" ? COLORS.critical : "#C5D5E8", fontSize: 12 }}>{estimatedDeparture(employee.status, employee.risk_score)}</td>
+                <td style={{ padding: "10px 12px", color: employee.status === "Parti" ? COLORS.critical : "#C5D5E8", fontSize: 12 }}>{estimateDepartureForEmployee(employee)}</td>
                 <td style={{ padding: "10px 12px", color: employee.overtime === "Yes" ? COLORS.high : COLORS.low, fontSize: 12 }}>{employee.overtime}</td>
                 <td style={{ padding: "10px 12px", color: employee.years_since_last_promotion > 3 ? COLORS.critical : "#C5D5E8", fontSize: 12 }}>{employee.years_since_last_promotion} ans</td>
               </tr>
@@ -173,7 +198,7 @@ function EmployeeTable({ employees, onSelect, selectedId }) {
   );
 }
 
-function EmployeeFocus({ detail, timeline }) {
+function EmployeeFocus({ detail }) {
   if (!detail) {
     return <div style={{ background: "#1B2E45", borderRadius: 10, padding: 28, textAlign: "center", color: "#8BA5BF", fontSize: 14 }}>Sélectionne un employé pour voir les leviers concrets.</div>;
   }
@@ -188,9 +213,9 @@ function EmployeeFocus({ detail, timeline }) {
         <div style={{ background: "#243B55", borderRadius: 8, padding: 10, marginBottom: 12, color: "#C5D5E8", fontSize: 12 }}>
           <div><strong>Statut:</strong> {detail.status === "Parti" ? "Déjà parti" : "Actif"}</div>
           <div style={{ marginTop: 4 }}>
-            <strong>Horizon de départ:</strong> {detail.status === "Parti" ? "Déjà parti" : timeline?.timeline?.months_until_departure != null ? `~${Math.round(timeline.timeline.months_until_departure)} mois` : estimatedDeparture("Actif", detail.risk_score)}
+            <strong>Horizon de départ:</strong> {estimateDepartureForEmployee(detail)}
           </div>
-          {detail.status !== "Parti" && timeline?.interpretation ? <div style={{ marginTop: 6, color: "#8BA5BF" }}>{timeline.interpretation}</div> : null}
+          {detail.status !== "Parti" ? <div style={{ marginTop: 6, color: "#8BA5BF" }}>Projection basée sur les facteurs de risque RH (cohérente avec le niveau de risque actuel).</div> : null}
         </div>
         <div style={{ color: "#C5D5E8", fontSize: 12, marginBottom: 10 }}>{detail.recommendation}</div>
         <div style={{ color: "#8BA5BF", fontSize: 11, marginBottom: 6 }}>Top facteurs influents</div>
@@ -391,9 +416,37 @@ function ModelPerformanceTab({ employees }) {
     let fp = 0;
     let tn = 0;
     let fn = 0;
+    let brierSum = 0;
+    let activeRisk = 0;
+    let leftRisk = 0;
+    let activeCount = 0;
+    let leftCount = 0;
+    let criticalCount = 0;
+    let criticalLeft = 0;
+
+    const threshold = 0.7;
+
     employees.forEach((employee) => {
       const actualLeave = employee.status === "Parti";
-      const predLeave = employee.risk_score >= 0.5;
+      const score = Number(employee.risk_score) || 0;
+      const predLeave = score >= threshold;
+      const actual = actualLeave ? 1 : 0;
+
+      brierSum += (score - actual) ** 2;
+
+      if (actualLeave) {
+        leftRisk += score;
+        leftCount += 1;
+      } else {
+        activeRisk += score;
+        activeCount += 1;
+      }
+
+      if (predLeave) {
+        criticalCount += 1;
+        if (actualLeave) criticalLeft += 1;
+      }
+
       if (actualLeave && predLeave) tp += 1;
       else if (!actualLeave && predLeave) fp += 1;
       else if (!actualLeave && !predLeave) tn += 1;
@@ -403,7 +456,30 @@ function ModelPerformanceTab({ employees }) {
     const recall = tp / Math.max(tp + fn, 1);
     const f1 = (2 * precision * recall) / Math.max(precision + recall, 1e-9);
     const accuracy = (tp + tn) / Math.max(tp + tn + fp + fn, 1);
-    return { tp, fp, tn, fn, precision, recall, f1, accuracy };
+    const brier = brierSum / Math.max(employees.length, 1);
+    const meanRiskActive = activeRisk / Math.max(activeCount, 1);
+    const meanRiskLeft = leftRisk / Math.max(leftCount, 1);
+    const separation = meanRiskLeft - meanRiskActive;
+    const alertCoverage = criticalCount / Math.max(employees.length, 1);
+    const criticalPrecision = criticalLeft / Math.max(criticalCount, 1);
+
+    return {
+      tp,
+      fp,
+      tn,
+      fn,
+      precision,
+      recall,
+      f1,
+      accuracy,
+      brier,
+      threshold,
+      meanRiskActive,
+      meanRiskLeft,
+      separation,
+      alertCoverage,
+      criticalPrecision,
+    };
   }, [employees]);
 
   const bands = useMemo(() => {
@@ -424,13 +500,146 @@ function ModelPerformanceTab({ employees }) {
     });
   }, [employees]);
 
+  const numericRows = useMemo(() => {
+    return employees.map((employee) => ({
+      leave: employee.status === "Parti" ? 1 : 0,
+      risk_score: Number(employee.risk_score) || 0,
+      salary: Number(employee.salary) || 0,
+      satisfaction: Number(employee.satisfaction) || 0,
+      engagement: Number(employee.engagement) || 0,
+      training_times: Number(employee.training_times) || 0,
+      years_at_company: Number(employee.years_at_company) || 0,
+      years_since_last_promotion: Number(employee.years_since_last_promotion) || 0,
+      distance_from_home: Number(employee.distance_from_home) || 0,
+      work_life_balance: Number(employee.work_life_balance) || 0,
+      performance_num: parsePerformance(employee.performance),
+    }));
+  }, [employees]);
+
+  const numericColumns = [
+    "risk_score",
+    "salary",
+    "satisfaction",
+    "engagement",
+    "training_times",
+    "years_at_company",
+    "years_since_last_promotion",
+    "distance_from_home",
+    "work_life_balance",
+    "performance_num",
+  ];
+
+  const pretty = {
+    risk_score: "Risk score",
+    salary: "Salary",
+    satisfaction: "Satisfaction",
+    engagement: "Engagement",
+    training_times: "Training times",
+    years_at_company: "Years at company",
+    years_since_last_promotion: "Years since last promotion",
+    distance_from_home: "Distance from home",
+    work_life_balance: "Work-life balance",
+    performance_num: "Performance",
+  };
+
+  const numericInsights = useMemo(() => {
+    const left = numericRows.filter((row) => row.leave === 1);
+    const active = numericRows.filter((row) => row.leave === 0);
+    return numericColumns.map((key) => {
+      const values = numericRows.map((row) => row[key]).sort((a, b) => a - b);
+      const median = values[Math.floor(values.length / 2)] || 0;
+      const high = numericRows.filter((row) => row[key] >= median);
+      const low = numericRows.filter((row) => row[key] < median);
+
+      const avgLeft = left.reduce((acc, row) => acc + row[key], 0) / Math.max(left.length, 1);
+      const avgActive = active.reduce((acc, row) => acc + row[key], 0) / Math.max(active.length, 1);
+
+      return {
+        key,
+        label: pretty[key] || key,
+        avgLeft,
+        avgActive,
+        median,
+        highLeaveRate: rate(high.filter((row) => row.leave === 1).length, high.length),
+        lowLeaveRate: rate(low.filter((row) => row.leave === 1).length, low.length),
+      };
+    });
+  }, [numericRows]);
+
+  const categoricalInsights = useMemo(() => {
+    const categoricalKeys = ["department", "position", "overtime", "status", "performance"];
+    return categoricalKeys.map((key) => {
+      const map = {};
+      employees.forEach((employee) => {
+        const value = String(employee[key] ?? "Unknown");
+        if (!map[value]) map[value] = { total: 0, leave: 0 };
+        map[value].total += 1;
+        if (employee.status === "Parti") map[value].leave += 1;
+      });
+      const rows = Object.entries(map)
+        .map(([value, stats]) => ({
+          value,
+          total: stats.total,
+          leaveRate: rate(stats.leave, stats.total),
+        }))
+        .sort((a, b) => b.total - a.total)
+        .slice(0, 8);
+      return { key, rows };
+    });
+  }, [employees]);
+
+  const corrMatrix = useMemo(() => {
+    const cols = numericColumns;
+    const matrix = {};
+
+    const corr = (a, b) => {
+      const n = Math.min(a.length, b.length);
+      if (!n) return 0;
+      const meanA = a.reduce((s, v) => s + v, 0) / n;
+      const meanB = b.reduce((s, v) => s + v, 0) / n;
+      let num = 0;
+      let denA = 0;
+      let denB = 0;
+      for (let i = 0; i < n; i += 1) {
+        const da = a[i] - meanA;
+        const db = b[i] - meanB;
+        num += da * db;
+        denA += da * da;
+        denB += db * db;
+      }
+      if (denA === 0 || denB === 0) return 0;
+      return num / Math.sqrt(denA * denB);
+    };
+
+    cols.forEach((colA) => {
+      matrix[colA] = {};
+      const arrA = numericRows.map((row) => row[colA]);
+      cols.forEach((colB) => {
+        const arrB = numericRows.map((row) => row[colB]);
+        matrix[colA][colB] = corr(arrA, arrB);
+      });
+    });
+
+    return { cols, matrix };
+  }, [numericRows]);
+
+  const heatColor = (value) => {
+    const v = Math.max(-1, Math.min(1, value));
+    if (v > 0) {
+      const alpha = 0.15 + Math.abs(v) * 0.45;
+      return `rgba(230,57,70,${alpha})`;
+    }
+    const alpha = 0.15 + Math.abs(v) * 0.45;
+    return `rgba(0,201,167,${alpha})`;
+  };
+
   return (
     <div style={{ display: "grid", gap: 16 }}>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 14 }}>
-        <SegmentCard title="Accuracy" value={`${(metrics.accuracy * 100).toFixed(1)}%`} subtitle="Seuil risque 50%" color="#378ADD" />
-        <SegmentCard title="Precision" value={`${(metrics.precision * 100).toFixed(1)}%`} subtitle="Prédits à risque qui partent" color="#FF9F1C" />
-        <SegmentCard title="Recall" value={`${(metrics.recall * 100).toFixed(1)}%`} subtitle="Départs correctement détectés" color="#E63946" />
-        <SegmentCard title="F1-score" value={`${(metrics.f1 * 100).toFixed(1)}%`} subtitle="Équilibre precision/recall" color="#A855F7" />
+        <SegmentCard title="Brier score" value={metrics.brier.toFixed(3)} subtitle="Plus bas = meilleure calibration" color="#378ADD" />
+        <SegmentCard title="Risk separation" value={`${(metrics.separation * 100).toFixed(1)} pts`} subtitle={`Départs ${(metrics.meanRiskLeft * 100).toFixed(1)}% vs Actifs ${(metrics.meanRiskActive * 100).toFixed(1)}%`} color="#FF9F1C" />
+        <SegmentCard title="Alert coverage" value={`${(metrics.alertCoverage * 100).toFixed(1)}%`} subtitle={`Profils critiques (seuil ${(metrics.threshold * 100).toFixed(0)}%)`} color="#E63946" />
+        <SegmentCard title="Critical precision" value={`${(metrics.criticalPrecision * 100).toFixed(1)}%`} subtitle="Parmi les critiques, % réellement partis" color="#A855F7" />
       </div>
 
       <div style={{ background: "#1B2E45", borderRadius: 10, padding: 16 }}>
@@ -450,6 +659,100 @@ function ModelPerformanceTab({ employees }) {
             <BarRow key={b.key} label={`${b.key} (${b.total})`} value={b.leaveRate} max={100} color={b.leaveRate > 40 ? "#E63946" : b.leaveRate > 20 ? "#FF9F1C" : "#00C9A7"} right={{ text: `${b.leaveRate.toFixed(1)}% départ réel`, color: "#C5D5E8" }} />
           ))}
         </div>
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+        <div style={{ background: "#1B2E45", borderRadius: 10, padding: 16 }}>
+          <div style={{ color: "#FFFFFF", fontWeight: 600, marginBottom: 8 }}>Analyse numérique (presque toutes les colonnes)</div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 10, maxHeight: 520, overflowY: "auto" }}>
+            {numericInsights.map((row) => (
+              <div key={row.key} style={{ background: "#243B55", borderRadius: 8, padding: 10 }}>
+                <div style={{ color: "#FFFFFF", fontSize: 12, fontWeight: 600, marginBottom: 6 }}>{row.label}</div>
+                <div style={{ color: "#8BA5BF", fontSize: 11, marginBottom: 6 }}>
+                  Avg actifs: {row.avgActive.toFixed(2)} | Avg partis: {row.avgLeft.toFixed(2)} | Médiane: {row.median.toFixed(2)}
+                </div>
+                <BarRow
+                  label="Leave rate (>= médiane)"
+                  value={row.highLeaveRate}
+                  max={100}
+                  color="#E63946"
+                  right={{ text: `${row.highLeaveRate.toFixed(1)}%`, color: "#FFC1CE" }}
+                />
+                <div style={{ height: 6 }} />
+                <BarRow
+                  label="Leave rate (< médiane)"
+                  value={row.lowLeaveRate}
+                  max={100}
+                  color="#00C9A7"
+                  right={{ text: `${row.lowLeaveRate.toFixed(1)}%`, color: "#B7F7DC" }}
+                />
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div style={{ background: "#1B2E45", borderRadius: 10, padding: 16 }}>
+          <div style={{ color: "#FFFFFF", fontWeight: 600, marginBottom: 8 }}>Analyse catégorielle (département/poste/overtime/statut/performance)</div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 12, maxHeight: 520, overflowY: "auto" }}>
+            {categoricalInsights.map((group) => (
+              <div key={group.key} style={{ background: "#243B55", borderRadius: 8, padding: 10 }}>
+                <div style={{ color: "#C5D5E8", fontSize: 12, fontWeight: 600, marginBottom: 6 }}>{group.key}</div>
+                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                  {group.rows.map((r) => (
+                    <BarRow
+                      key={`${group.key}-${r.value}`}
+                      label={`${r.value} (${r.total})`}
+                      value={r.leaveRate}
+                      max={100}
+                      color={r.leaveRate > 40 ? "#E63946" : r.leaveRate > 20 ? "#FF9F1C" : "#00C9A7"}
+                      right={{ text: `${r.leaveRate.toFixed(1)}%`, color: "#C5D5E8" }}
+                    />
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      <div style={{ background: "#1B2E45", borderRadius: 10, padding: 16, overflowX: "auto" }}>
+        <div style={{ color: "#FFFFFF", fontWeight: 600, marginBottom: 10 }}>Correlation matrix (numérique)</div>
+        <table style={{ borderCollapse: "separate", borderSpacing: 4, minWidth: 900 }}>
+          <thead>
+            <tr>
+              <th style={{ color: "#8BA5BF", fontSize: 11, textAlign: "left", padding: 6 }}>Feature</th>
+              {corrMatrix.cols.map((col) => (
+                <th key={`h-${col}`} style={{ color: "#8BA5BF", fontSize: 11, padding: 6 }}>{pretty[col] || col}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {corrMatrix.cols.map((rowKey) => (
+              <tr key={`r-${rowKey}`}>
+                <td style={{ color: "#C5D5E8", fontSize: 11, padding: 6, fontWeight: 600 }}>{pretty[rowKey] || rowKey}</td>
+                {corrMatrix.cols.map((colKey) => {
+                  const v = corrMatrix.matrix[rowKey][colKey];
+                  return (
+                    <td
+                      key={`${rowKey}-${colKey}`}
+                      style={{
+                        background: heatColor(v),
+                        color: "#FFFFFF",
+                        textAlign: "center",
+                        padding: "6px 8px",
+                        borderRadius: 6,
+                        fontSize: 11,
+                        minWidth: 62,
+                      }}
+                    >
+                      {v.toFixed(2)}
+                    </td>
+                  );
+                })}
+              </tr>
+            ))}
+          </tbody>
+        </table>
       </div>
     </div>
   );
@@ -476,7 +779,7 @@ function DetailsForecastTab({ employees, terminationReasons }) {
     const horizons = ["0-3 mois", "3-6 mois", "6-12 mois", "12-18 mois", ">18 mois"];
     const counts = horizons.map((h) => ({
       horizon: h,
-      count: active.filter((employee) => estimatedDeparture("Actif", employee.risk_score) === h).length,
+      count: active.filter((employee) => estimateDepartureForEmployee(employee) === h).length,
     }));
     const nextCritical = [...active]
       .filter((employee) => employee.risk_score >= 0.7)
@@ -533,7 +836,7 @@ function DetailsForecastTab({ employees, terminationReasons }) {
                   <td style={{ padding: "10px 12px", color: "#C5D5E8", fontSize: 12 }}>{e.department}</td>
                   <td style={{ padding: "10px 12px", color: "#8BA5BF", fontSize: 12 }}>{e.position}</td>
                   <td style={{ padding: "10px 12px", color: "#E63946", fontWeight: 700, fontSize: 12 }}>{Math.round(e.risk_score * 100)}%</td>
-                  <td style={{ padding: "10px 12px", color: "#C5D5E8", fontSize: 12 }}>{estimatedDeparture(e.status, e.risk_score)}</td>
+                  <td style={{ padding: "10px 12px", color: "#C5D5E8", fontSize: 12 }}>{estimateDepartureForEmployee(e)}</td>
                   <td style={{ padding: "10px 12px", color: e.overtime === "Yes" ? "#FF9F1C" : "#00C9A7", fontSize: 12 }}>{e.overtime}</td>
                 </tr>
               ))}
@@ -555,7 +858,6 @@ export default function HRAttritionV2() {
   const [correlationData, setCorrelationData] = useState(null);
   const [terminationReasons, setTerminationReasons] = useState(null);
   const [selected, setSelected] = useState(null);
-  const [selectedTimeline, setSelectedTimeline] = useState(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [activeOnly, setActiveOnly] = useState(true);
   const [statusFilter, setStatusFilter] = useState("all");
@@ -633,9 +935,8 @@ export default function HRAttritionV2() {
   async function handleSelect(employee) {
     setDetailLoading(true);
     try {
-      const [detail, timeline] = await Promise.all([api.hrPredict(employee.emp_id), api.hrTimeline(employee.emp_id)]);
+      const detail = await api.hrPredict(employee.emp_id);
       setSelected(detail);
-      setSelectedTimeline(timeline);
     } catch (err) {
       setError(`Employee detail failed: ${err.message}`);
     } finally {
@@ -649,7 +950,7 @@ export default function HRAttritionV2() {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
       <div>
-        <h1 style={{ color: "#FFFFFF", margin: 0, fontSize: 22, fontWeight: 700 }}>📊 HR Attrition Dashboard (Dataset v2)</h1>
+        <h1 style={{ color: "#FFFFFF", margin: 0, fontSize: 22, fontWeight: 700 }}>📊 HR Attrition Dashboard</h1>
         <p style={{ color: "#8BA5BF", margin: "6px 0 0", fontSize: 13 }}>Focus opérationnel: talents, performance modèle, raisons de départ et prévision des profils critiques.</p>
       </div>
 
@@ -657,7 +958,6 @@ export default function HRAttritionV2() {
         {[
           { key: "overview", label: "📊 Overview" },
           { key: "model", label: "📈 Model performance" },
-          { key: "details", label: "🧭 Reasons & Future" },
         ].map((t) => (
           <button key={t.key} onClick={() => setTab(t.key)} style={{ background: tab === t.key ? "#378ADD" : "#1B2E45", color: "#fff", border: "1px solid #2F4C6C", borderRadius: 8, padding: "8px 12px", fontSize: 12, cursor: "pointer" }}>
             {t.label}
@@ -708,14 +1008,13 @@ export default function HRAttritionV2() {
             </div>
           </div>
 
-          <div>{detailLoading ? <div style={{ color: "#8BA5BF", padding: 12 }}>Chargement détail employé...</div> : <EmployeeFocus detail={selected} timeline={selectedTimeline} />}</div>
+          <div>{detailLoading ? <div style={{ color: "#8BA5BF", padding: 12 }}>Chargement détail employé...</div> : <EmployeeFocus detail={selected} />}</div>
         </>
       ) : null}
 
       {tab === "model" ? <ModelPerformanceTab employees={allEmployees} /> : null}
-      {tab === "details" ? <DetailsForecastTab employees={allEmployees} terminationReasons={terminationReasons} /> : null}
 
-      <div style={{ color: "#8BA5BF", fontSize: 11 }}>Horizon affiché = estimation de priorisation (0-3, 3-6, 6-12, 12-18, &gt;18 mois) selon score de risque et statut.</div>
+      <div style={{ color: "#8BA5BF", fontSize: 11 }}>Horizon affiché = estimation de priorisation (0-3, 3-6, 6-12, 12-18, 18-24, &gt;24 mois) selon score + facteurs RH.</div>
       <ChatAssistant selectedEmpId={selected?.emp_id} employees={allEmployees} />
     </div>
   );
