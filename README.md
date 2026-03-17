@@ -167,7 +167,7 @@ Hackathon-Explainability-AI/
 
 ---
 
-## 🔐 Security & Compliance Summary
+## Security & Compliance Summary
 
 | Requirement | Status |
 |---|---|
