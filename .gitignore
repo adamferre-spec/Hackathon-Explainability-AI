@@ -1,0 +1,33 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+dist/
+*.pkl
+*.parquet
+
+# Data (trop volumineux)
+backend/data/raw/
+backend/data/processed/
+
+# Node
+node_modules/
+frontend/dist/
+
+# Secrets
+config/salt.key
+.env
+*.env
+
+# IDE
+.vscode/
+.idea/
+
+# MLflow
+mlruns/
+
+# OS
+.DS_Store
+Thumbs.db
