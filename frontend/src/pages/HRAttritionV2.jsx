@@ -164,7 +164,7 @@ function InfluenceInsights({ correlationData }) {
   );
 }
 
-function EmployeeTable({ employees, onSelect, selectedId }) {
+function EmployeeTable({ employees, onSelect, selectedId, isLoading }) {
   return (
     <div style={{ background: "#1B2E45", borderRadius: 10, overflow: "hidden" }}>
       <div style={{ padding: "14px 20px", borderBottom: "1px solid #243B55", color: "#FFFFFF", fontSize: 15, fontWeight: 600 }}>
@@ -181,7 +181,7 @@ function EmployeeTable({ employees, onSelect, selectedId }) {
           </thead>
           <tbody>
             {employees.map((employee) => (
-              <tr key={employee.emp_id} onClick={() => onSelect(employee)} style={{ cursor: "pointer", background: selectedId === employee.emp_id ? "#243B55" : "transparent", borderBottom: "1px solid #1B2E45" }}>
+              <tr key={employee.emp_id} onClick={() => !isLoading && onSelect(employee)} style={{ cursor: isLoading ? "not-allowed" : "pointer", background: selectedId === employee.emp_id ? "#243B55" : "transparent", borderBottom: "1px solid #1B2E45", opacity: isLoading ? 0.5 : 1 }}>
                 <td style={{ padding: "10px 12px", color: "#C5D5E8", fontSize: 12 }}>{employee.name}</td>
                 <td style={{ padding: "10px 12px", color: "#C5D5E8", fontSize: 12 }}>{employee.department}</td>
                 <td style={{ padding: "10px 12px", color: "#8BA5BF", fontSize: 12 }}>{employee.position}</td>
@@ -195,287 +195,62 @@ function EmployeeTable({ employees, onSelect, selectedId }) {
           </tbody>
         </table>
       </div>
+      {isLoading && (
+        <div style={{ padding: 20, textAlign: "center", color: "#8BA5BF", fontSize: 12 }}>
+          ⏳ Chargement des données...
+        </div>
+      )}
     </div>
   );
 }
 
-function EmployeeFocus({ detail }) {
+function EmployeeAnalysisPanel({ detail, recommendations }) {
   if (!detail) {
-    return <div style={{ background: "#1B2E45", borderRadius: 10, padding: 28, textAlign: "center", color: "#8BA5BF", fontSize: 14 }}>Sélectionne un employé pour voir les leviers concrets.</div>;
+    return (
+      <div style={{ background: "#1B2E45", borderRadius: 10, padding: 16 }}>
+        <div style={{ color: "#FFFFFF", fontSize: 14, fontWeight: 600, marginBottom: 8 }}>Analyse employé</div>
+        <div style={{ color: "#8BA5BF", fontSize: 12 }}>Sélectionne un employé dans le tableau pour afficher son analyse personnalisée.</div>
+      </div>
+    );
   }
 
+  const topFactors = (detail.risk_factors || []).slice(0, 4);
+  const firstActionPack = (recommendations?.recommendations || [])[0];
+  const actions = (firstActionPack?.actions || []).slice(0, 3);
+
   return (
-    <div style={{ background: "#1B2E45", borderRadius: 10, overflow: "hidden" }}>
-      <div style={{ padding: "14px 20px", borderBottom: "1px solid #243B55", color: "#FFFFFF", fontWeight: 600 }}>Plan d’action — {detail.name}</div>
-      <div style={{ padding: 16 }}>
-        <div style={{ padding: 10, borderRadius: 8, background: `${riskColor(detail.risk_score)}22`, border: `1px solid ${riskColor(detail.risk_score)}55`, color: riskColor(detail.risk_score), fontWeight: 700, marginBottom: 12 }}>
-          Risque de départ: {detail.risk_level} ({Math.round(detail.risk_score * 100)}%)
+    <div style={{ background: "#1B2E45", borderRadius: 10, padding: 16 }}>
+      <div style={{ color: "#FFFFFF", fontSize: 14, fontWeight: 600, marginBottom: 8 }}>Analyse employé — {detail.name}</div>
+
+      <div style={{ background: "#243B55", borderRadius: 8, padding: 10, marginBottom: 10 }}>
+        <div style={{ color: "#C5D5E8", fontSize: 12 }}>
+          <strong>Risque:</strong> <span style={{ color: riskColor(detail.risk_score), fontWeight: 700 }}>{detail.risk_level}</span> ({Math.round(detail.risk_score * 100)}%)
         </div>
-        <div style={{ background: "#243B55", borderRadius: 8, padding: 10, marginBottom: 12, color: "#C5D5E8", fontSize: 12 }}>
-          <div><strong>Statut:</strong> {detail.status === "Parti" ? "Déjà parti" : "Actif"}</div>
-          <div style={{ marginTop: 4 }}>
-            <strong>Horizon de départ:</strong> {estimateDepartureForEmployee(detail)}
+        <div style={{ color: "#8BA5BF", fontSize: 11, marginTop: 4 }}>
+          <strong>Horizon:</strong> {estimateDepartureForEmployee(detail)}
+        </div>
+      </div>
+
+      <div style={{ color: "#8BA5BF", fontSize: 11, marginBottom: 6 }}>Facteurs dominants (profil individuel)</div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 12 }}>
+        {topFactors.map((factor) => (
+          <div key={factor.feature} style={{ background: "#243B55", borderRadius: 6, padding: "7px 9px", display: "flex", justifyContent: "space-between" }}>
+            <span style={{ color: "#C5D5E8", fontSize: 11 }}>{factor.feature}</span>
+            <span style={{ color: "#00C9A7", fontSize: 11, fontWeight: 700 }}>{(factor.importance * 100).toFixed(1)}%</span>
           </div>
-          {detail.status !== "Parti" ? <div style={{ marginTop: 6, color: "#8BA5BF" }}>Projection basée sur les facteurs de risque RH (cohérente avec le niveau de risque actuel).</div> : null}
-        </div>
-        <div style={{ color: "#C5D5E8", fontSize: 12, marginBottom: 10 }}>{detail.recommendation}</div>
-        <div style={{ color: "#8BA5BF", fontSize: 11, marginBottom: 6 }}>Top facteurs influents</div>
-        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-          {(detail.risk_factors || []).slice(0, 6).map((factor) => (
-            <div key={factor.feature} style={{ background: "#243B55", borderRadius: 6, padding: "8px 10px" }}>
-              <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 3 }}>
-                <span style={{ color: "#FFFFFF", fontSize: 12 }}>{factor.feature}</span>
-                <span style={{ color: "#00C9A7", fontSize: 11 }}>{(factor.importance * 100).toFixed(1)}%</span>
-              </div>
-              <div style={{ color: "#8BA5BF", fontSize: 11 }}>Valeur: {String(factor.value)}</div>
-            </div>
+        ))}
+      </div>
+
+      <div style={{ color: "#8BA5BF", fontSize: 11, marginBottom: 6 }}>Priorités d’action</div>
+      {actions.length > 0 ? (
+        <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+          {actions.map((action, index) => (
+            <div key={`${action}-${index}`} style={{ color: "#C5D5E8", fontSize: 11 }}>• {action}</div>
           ))}
         </div>
-      </div>
-    </div>
-  );
-}
-
-function ChatAssistant({ selectedEmpId, employees }) {
-  const [open, setOpen] = useState(false);
-  const [loading, setLoading] = useState(false);
-  const [message, setMessage] = useState("");
-  const [suggestions, setSuggestions] = useState([]);
-  const [messages, setMessages] = useState([
-    { role: "assistant", text: "Bonjour 👋 Je peux aider sur rétention, top performers, et priorités RH." },
-  ]);
-
-  useEffect(() => {
-    async function loadSuggestions() {
-      try {
-        const data = await api.hrChatSuggestions();
-        if (Array.isArray(data?.suggestions)) {
-          setSuggestions(data.suggestions.slice(0, 5));
-          return;
-        }
-      } catch {
-      }
-      setSuggestions([
-        "How do I retain top talent?",
-        "Show me top performers",
-        "Who will become critical next?",
-        "What are the top reasons for leaving?",
-      ]);
-    }
-    loadSuggestions();
-  }, []);
-
-  const topPerformers = useMemo(() => {
-    return employees
-      .filter((employee) => employee.status === "Actif")
-      .map((employee) => ({ ...employee, perf: parsePerformance(employee.performance) }))
-      .filter((employee) => employee.perf >= 4)
-      .sort((a, b) => b.perf - a.perf || a.risk_score - b.risk_score)
-      .slice(0, 6);
-  }, [employees]);
-
-  function localTopPerformerAnswer() {
-    if (!topPerformers.length) {
-      return {
-        text: "Je ne trouve pas de top performers actifs avec score de performance élevé dans les données actuelles.",
-        performers: [],
-      };
-    }
-
-    const byDepartment = topPerformers.reduce((acc, row) => {
-      acc[row.department] = (acc[row.department] || 0) + 1;
-      return acc;
-    }, {});
-
-    const best = topPerformers[0];
-    const deptSummary = Object.entries(byDepartment)
-      .map(([dep, cnt]) => `${dep}: ${cnt}`)
-      .join(" | ");
-
-    return {
-      text:
-        `Your organization has high-performing talent across multiple departments. ` +
-        `Top performer now: ${best.name} (${best.position}, ${best.department}) with risk ${Math.round(best.risk_score * 100)}%. ` +
-        `Department spread: ${deptSummary}. ` +
-        `Retention priority: protect these profiles with promotion plans and workload control.`,
-      performers: topPerformers,
-    };
-  }
-
-  async function send(userText) {
-    if (!userText?.trim()) return;
-    const text = userText.trim();
-    const lower = text.toLowerCase();
-    const asksTop =
-      lower.includes("top performer") ||
-      lower.includes("top performers") ||
-      lower.includes("retain top talent") ||
-      lower.includes("high-performing talent") ||
-      lower.includes("show me top");
-
-    setMessages((prev) => [...prev, { role: "user", text }]);
-    setMessage("");
-    setLoading(true);
-
-    let backendAnswer = "";
-    try {
-      const data = await api.hrChat(text, selectedEmpId || null);
-      backendAnswer = data?.response || "";
-    } catch {
-      backendAnswer = "";
-    }
-
-    if (asksTop) {
-      const local = localTopPerformerAnswer();
-      const useBackend =
-        backendAnswer &&
-        !backendAnswer.toLowerCase().includes("high-performing talent across multiple departments");
-      const finalText = useBackend ? `${backendAnswer}\n\n${local.text}` : local.text;
-      setMessages((prev) => [...prev, { role: "assistant", text: finalText, performers: local.performers }]);
-      setLoading(false);
-      return;
-    }
-
-    setMessages((prev) => [
-      ...prev,
-      { role: "assistant", text: backendAnswer || "Je n'ai pas pu répondre côté backend. Essaie une question sur top performers, risque critique, ou raisons de départ." },
-    ]);
-    setLoading(false);
-  }
-
-  return (
-    <>
-      <button
-        onClick={() => setOpen((value) => !value)}
-        style={{
-          position: "fixed",
-          right: 20,
-          bottom: 20,
-          background: "linear-gradient(135deg, #378ADD, #00C9A7)",
-          color: "#fff",
-          border: "none",
-          borderRadius: 999,
-          padding: "12px 16px",
-          fontSize: 13,
-          fontWeight: 700,
-          cursor: "pointer",
-          zIndex: 50,
-          boxShadow: "0 8px 22px rgba(0,0,0,0.35)",
-        }}
-      >
-        💬 HR Assistant
-      </button>
-
-      {open ? (
-        <div style={{ position: "fixed", right: 20, bottom: 74, width: 380, height: 530, background: "#122235", border: "1px solid #2F4C6C", borderRadius: 12, display: "flex", flexDirection: "column", zIndex: 50, boxShadow: "0 12px 28px rgba(0,0,0,0.45)" }}>
-          <div style={{ padding: "10px 12px", borderBottom: "1px solid #243B55", color: "#fff", fontWeight: 700, fontSize: 13 }}>
-            Assistant RH IA
-            {selectedEmpId ? <span style={{ color: "#8BA5BF", fontWeight: 400 }}> • contexte Emp_{selectedEmpId}</span> : null}
-          </div>
-
-          <div style={{ padding: 10, display: "flex", gap: 6, flexWrap: "wrap", borderBottom: "1px solid #243B55" }}>
-            {suggestions.map((s) => (
-              <button key={s} onClick={() => send(s)} style={{ background: "#1B2E45", border: "1px solid #2F4C6C", borderRadius: 999, color: "#C5D5E8", padding: "4px 8px", fontSize: 10, cursor: "pointer" }}>
-                {s}
-              </button>
-            ))}
-          </div>
-
-          <div style={{ flex: 1, overflowY: "auto", padding: 10, display: "flex", flexDirection: "column", gap: 8 }}>
-            {messages.map((m, i) => (
-              <div key={`${m.role}-${i}`} style={{ alignSelf: m.role === "user" ? "flex-end" : "flex-start", maxWidth: "90%", background: m.role === "user" ? "#378ADD" : "#1B2E45", color: m.role === "user" ? "#fff" : "#C5D5E8", borderRadius: 10, padding: "8px 10px", fontSize: 12, lineHeight: 1.4 }}>
-                <div>{m.text}</div>
-                {Array.isArray(m.performers) && m.performers.length > 0 ? (
-                  <div style={{ marginTop: 8, borderTop: "1px solid #2F4C6C", paddingTop: 8 }}>
-                    {m.performers.map((p) => (
-                      <div key={p.emp_id} style={{ fontSize: 11, marginBottom: 4, color: "#A7C7E7" }}>
-                        {p.name} • {p.department} • Perf {parsePerformance(p.performance)} • Risque {Math.round(p.risk_score * 100)}%
-                      </div>
-                    ))}
-                  </div>
-                ) : null}
-              </div>
-            ))}
-            {loading ? <div style={{ color: "#8BA5BF", fontSize: 11 }}>Assistant en train d'écrire…</div> : null}
-          </div>
-
-          <div style={{ padding: 10, borderTop: "1px solid #243B55", display: "flex", gap: 8 }}>
-            <input value={message} onChange={(e) => setMessage(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") send(message); }} placeholder="Pose une question RH…" style={{ flex: 1, background: "#0D1B2A", border: "1px solid #2F4C6C", borderRadius: 8, color: "#fff", padding: "8px 10px", fontSize: 12 }} />
-            <button onClick={() => send(message)} disabled={loading} style={{ background: "#00C9A7", color: "#082129", border: "none", borderRadius: 8, padding: "8px 10px", fontWeight: 700, cursor: "pointer" }}>
-              Envoyer
-            </button>
-          </div>
-        </div>
-      ) : null}
-    </>
-  );
-}
-
-function ShapExplainerPanel({ shap }) {
-  if (!shap?.waterfall) return null;
-  
-  const { waterfall } = shap;
-  const factors = waterfall.factors || [];
-  const topFactors = factors.slice(0, 8);
-  
-  return (
-    <div style={{ background: "#1B2E45", borderRadius: 10, overflow: "hidden" }}>
-      <div style={{ padding: "14px 20px", borderBottom: "1px solid #243B55", color: "#FFFFFF", fontWeight: 600, fontSize: 14 }}>
-        🔍 SHAP Waterfall — {shap.name}
-      </div>
-      <div style={{ padding: 16, display: "flex", flexDirection: "column", gap: 14 }}>
-        <div style={{ background: "#243B55", borderRadius: 8, padding: 10 }}>
-          <div style={{ color: "#8BA5BF", fontSize: 11, marginBottom: 4 }}>Base Value (probabilité sans facteurs)</div>
-          <div style={{ color: "#C5D5E8", fontSize: 12, fontWeight: 600 }}>{(waterfall.base_value * 100).toFixed(2)}%</div>
-          <div style={{ color: "#A7C7E7", fontSize: 10, marginTop: 6 }}>↓ Influence des facteurs individuels ↓</div>
-          <div style={{ height: 2, background: `linear-gradient(90deg, #378ADD, #00C9A7)`, borderRadius: 1, margin: "6px 0" }} />
-          <div style={{ color: "#C5D5E8", fontSize: 12, fontWeight: 600, marginTop: 6 }}>Prédiction: {(waterfall.final_prediction * 100).toFixed(2)}%</div>
-          <div style={{ color: "#8BA5BF", fontSize: 10, marginTop: 2 }}>Δ = {(waterfall.delta_from_base > 0 ? "+" : "")}{(waterfall.delta_from_base * 100).toFixed(2)}%</div>
-        </div>
-
-        <div>
-          <div style={{ color: "#8BA5BF", fontSize: 11, marginBottom: 8, fontWeight: 600 }}>Impact des variables principales</div>
-          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-            {topFactors.map((f) => {
-              const isRisk = f.shap_value > 0;
-              const color = isRisk ? "#E63946" : "#00C9A7";
-              return (
-                <div key={f.feature} style={{ background: "#243B55", borderRadius: 6, padding: "8px 10px", borderLeft: `3px solid ${color}` }}>
-                  <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 3 }}>
-                    <span style={{ color: "#FFFFFF", fontSize: 11, fontWeight: 600 }}>{f.feature}</span>
-                    <span style={{ color, fontSize: 11, fontWeight: 700 }}>{isRisk ? "↑" : "↓"} {(Math.abs(f.shap_value) * 100).toFixed(2)}%</span>
-                  </div>
-                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: 10, color: "#8BA5BF" }}>
-                    <span>Valeur: {f.value?.toFixed ? f.value.toFixed(2) : f.value}</span>
-                    <span>{f.impact_percentage}% du total</span>
-                  </div>
-                  <div style={{ height: 4, background: "#0D1B2A", borderRadius: 2, marginTop: 4 }}>
-                    <div style={{ height: "100%", width: `${f.impact_percentage}%`, background: color, borderRadius: 2 }} />
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-
-        {shap.interpretation?.high_risk_factors?.length > 0 ? (
-          <div style={{ background: "#E639464C", border: "1px solid #E63946", borderRadius: 8, padding: 10 }}>
-            <div style={{ color: "#FF9F9F", fontSize: 11, fontWeight: 600, marginBottom: 4 }}>🔴 Facteurs aggravants</div>
-            <div style={{ color: "#FFD9D9", fontSize: 10 }}>
-              {shap.interpretation.high_risk_factors.join(", ")}
-            </div>
-          </div>
-        ) : null}
-
-        {shap.interpretation?.protective_factors?.length > 0 ? (
-          <div style={{ background: "#00C9A74C", border: "1px solid #00C9A7", borderRadius: 8, padding: 10 }}>
-            <div style={{ color: "#7FFBDB", fontSize: 11, fontWeight: 600, marginBottom: 4 }}>🟢 Facteurs protecteurs</div>
-            <div style={{ color: "#D1F5EB", fontSize: 10 }}>
-              {shap.interpretation.protective_factors.join(", ")}
-            </div>
-          </div>
-        ) : null}
-      </div>
+      ) : (
+        <div style={{ color: "#8BA5BF", fontSize: 11 }}>Les recommandations apparaissent après chargement complet du profil.</div>
+      )}
     </div>
   );
 }
@@ -483,7 +258,9 @@ function ShapExplainerPanel({ shap }) {
 function RecommendationsPanel({ recommendations }) {
   if (!recommendations?.recommendations) return null;
   
-  const recs = recommendations.recommendations;
+  const recs = recommendations.optimized_plan?.recommended_actions?.length
+    ? recommendations.optimized_plan.recommended_actions
+    : recommendations.recommendations;
   
   return (
     <div style={{ background: "#1B2E45", borderRadius: 10, overflow: "hidden" }}>
@@ -531,6 +308,12 @@ function RecommendationsPanel({ recommendations }) {
                   ))}
                 </ul>
               </div>
+
+              {rec.estimated_cost_points != null && rec.estimated_risk_reduction_points != null ? (
+                <div style={{ color: "#8BA5BF", fontSize: 10, marginBottom: 4 }}>
+                  Coût estimé: {rec.estimated_cost_points.toFixed(1)} | Gain risque: -{rec.estimated_risk_reduction_points.toFixed(1)} pts | Efficacité: {rec.efficiency_score?.toFixed ? rec.efficiency_score.toFixed(2) : rec.efficiency_score}
+                </div>
+              ) : null}
               
               {rec.expected_impact && (
                 <div style={{ color: colors.text, fontSize: 10, fontStyle: "italic" }}>
@@ -1138,9 +921,15 @@ export default function HRAttritionV2() {
           </div>
 
           <div style={{ display: "grid", gridTemplateColumns: "1.3fr 1fr", gap: 18 }}>
-            <EmployeeTable employees={visibleEmployees} onSelect={handleSelect} selectedId={selected?.emp_id} />
+            <EmployeeTable employees={visibleEmployees} onSelect={handleSelect} selectedId={selected?.emp_id} isLoading={detailLoading} />
             <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
-              <ShapLikePanel explainability={explainability} correlationMap={correlationMap} />
+              {detailLoading ? (
+                <div style={{ background: "#1B2E45", borderRadius: 10, padding: 32, textAlign: "center", color: "#8BA5BF", fontSize: 13 }}>
+                  ⏳ Chargement données employé...
+                </div>
+              ) : (
+                <EmployeeAnalysisPanel detail={selected} recommendations={recommendations} />
+              )}
               <InfluenceInsights correlationData={correlationData} />
               <div style={{ background: "#1B2E45", borderRadius: 10, padding: 16 }}>
                 <div style={{ color: "#FFFFFF", fontSize: 14, fontWeight: 600, marginBottom: 8 }}>Segments utiles</div>
@@ -1153,13 +942,15 @@ export default function HRAttritionV2() {
             </div>
           </div>
 
-          <div>{detailLoading ? <div style={{ color: "#8BA5BF", padding: 12 }}>Chargement détail employé...</div> : <EmployeeFocus detail={selected} />}</div>
-
-          {selected && (
+          {selected && !detailLoading && (
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 18 }}>
-              <ShapExplainerPanel shap={shap} />
               <ShapVisualization shap={shap} />
               <RecommendationsPanel recommendations={recommendations} />
+            </div>
+          )}
+          {detailLoading && selected && (
+            <div style={{ background: "#1B2E45", borderRadius: 10, padding: 32, textAlign: "center", color: "#8BA5BF", fontSize: 13 }}>
+              ⏳ Chargement SHAP et recommandations...
             </div>
           )}
         </>
@@ -1168,7 +959,6 @@ export default function HRAttritionV2() {
       {tab === "model" ? <ModelPerformanceTab employees={allEmployees} /> : null}
 
       <div style={{ color: "#8BA5BF", fontSize: 11 }}>Horizon affiché = estimation de priorisation (0-3, 3-6, 6-12, 12-18, 18-24, &gt;24 mois) selon score + facteurs RH.</div>
-      <ChatAssistant selectedEmpId={selected?.emp_id} employees={allEmployees} />
     </div>
   );
 }

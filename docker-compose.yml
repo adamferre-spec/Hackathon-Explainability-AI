@@ -12,6 +12,8 @@ services:
     environment:
       - PYTHONUNBUFFERED=1
     command: uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+    networks:
+      - cyberguard-network
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 10s
@@ -30,7 +32,13 @@ services:
       - VITE_API_URL=/api
     depends_on:
       - backend
+    networks:
+      - cyberguard-network
     command: npm run dev -- --host
+
+networks:
+  cyberguard-network:
+    driver: bridge
 
 volumes:
   model-artifacts:

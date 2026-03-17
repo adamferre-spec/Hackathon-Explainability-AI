@@ -101,9 +101,4 @@ export const api = {
   hrTerminationReasons:  ()           => req("/hr/termination-reasons"),
   hrShapExplain:         (empId)      => req(`/hr/shap-explain/${empId}`),
   hrRecommendations:     (empId)      => req(`/hr/recommendations/${empId}`),
-  hrChat:                (message, empId = null) => req("/advanced/chat", {
-    method: "POST",
-    body: JSON.stringify({ message, emp_id: empId }),
-  }),
-  hrChatSuggestions:     ()           => req("/advanced/chat/suggestions"),
 };

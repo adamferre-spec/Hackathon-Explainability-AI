@@ -10,6 +10,7 @@ import numpy as np
 import os
 from datetime import datetime
 import json
+from functools import lru_cache
 
 router = APIRouter()
 
@@ -22,6 +23,10 @@ _model = None
 _features: list[str] = []
 _encoded_columns: list[str] = []
 _feature_importances: dict[str, float] = {}
+_shap_explainer = None
+_shap_values_cache = None
+_shap_values_index_map = None
+_recommendations_cache: dict[int, dict] = {}  # Simple cache for recommendations
 
 NUMERIC_FEATURES = [
     "Age",
@@ -78,7 +83,8 @@ def _prepare_model_frame(df: pd.DataFrame, fit: bool = False) -> pd.DataFrame:
     for column in [feature for feature in CATEGORICAL_FEATURES if feature in working.columns]:
         working[column] = working[column].fillna("Unknown").astype(str)
 
-    encoded = pd.get_dummies(working, columns=[feature for feature in CATEGORICAL_FEATURES if feature in working.columns], dummy_na=False)
+    # Use drop_first=True to avoid duplicate columns in categorical encoding (e.g., OverTime_Yes/No becomes just OverTime_Yes)
+    encoded = pd.get_dummies(working, columns=[feature for feature in CATEGORICAL_FEATURES if feature in working.columns], dummy_na=False, drop_first=True)
 
     if fit:
         _encoded_columns = encoded.columns.tolist()
@@ -181,6 +187,38 @@ def _get_model():
     _feature_importances = _aggregate_feature_importances(X.columns.tolist(), clf.feature_importances_)
     _model = clf
     return _model, _features
+
+
+def _init_shap_cache():
+    """Initialize SHAP explainer and pre-compute all SHAP values once at startup."""
+    global _shap_explainer, _shap_values_cache, _shap_values_index_map
+    
+    if _shap_explainer is not None:
+        return  # Already initialized
+    
+    import shap
+    
+    df = _load_data()
+    model, features = _get_model()
+    
+    X = _prepare_model_frame(df)
+    
+    print("[INFO] Initializing SHAP explainer (once)...")
+    _shap_explainer = shap.TreeExplainer(model)
+    
+    print(f"[INFO] Pre-computing SHAP values for {len(df)} employees...")
+    shap_values_full = _shap_explainer.shap_values(X)
+    
+    # Store for class 1 (Attrition)
+    if isinstance(shap_values_full, list):
+        _shap_values_cache = shap_values_full[1]
+    else:
+        _shap_values_cache = shap_values_full[:, :, 1]
+    
+    # Map employee IDs to indices for quick lookup
+    _shap_values_index_map = {emp_id: idx for idx, emp_id in enumerate(df["EmployeeNumber"].values)}
+    
+    print(f"[INFO] SHAP cache ready for {len(_shap_values_index_map)} employees")
 
 
 # ── SECURITY & CYBERSECURITY ────────────────────────────────────────
@@ -302,9 +340,11 @@ def hr_predict_employee(emp_id: int):
     if row.empty:
         raise HTTPException(status_code=404, detail="Employé introuvable")
 
+    row_index = int(row.index[0])
     row = row.iloc[0]
-    X = _prepare_model_frame(pd.DataFrame([row]))
-    proba = float(model.predict_proba(X)[:, 1][0])
+    X_all = _prepare_model_frame(df)
+    probas_all = model.predict_proba(X_all)[:, 1]
+    proba = float(probas_all[row_index])
 
     # Audit log 
     _create_audit_log(emp_id, "PREDICTION", proba)
@@ -802,7 +842,8 @@ def hr_shap_explain(emp_id: int):
     - Contribution relative de chaque facteur
     - Comparaison avec d'autres employés
     """
-    import shap
+    # Initialize SHAP cache if not already done
+    _init_shap_cache()
     
     df = _load_data()
     model, features = _get_model()
@@ -814,30 +855,30 @@ def hr_shap_explain(emp_id: int):
     
     row = row.iloc[0]
     
-    # Préparer les données
-    X = _prepare_model_frame(df)
-    X_employee = _prepare_model_frame(pd.DataFrame([row]))
+    # Get pre-computed SHAP values from cache
+    if emp_id not in _shap_values_index_map:
+        raise HTTPException(status_code=404, detail="Employé not in SHAP cache")
     
-    # Calculer SHAP values
-    explainer = shap.TreeExplainer(model)
-    shap_values = explainer.shap_values(X)
-    
-    # Index de l'employé
-    emp_idx = df[df["EmployeeNumber"] == emp_id].index[0]
-    
-    # Extraire les SHAP values pour la classe 1 (Attrition)
-    if isinstance(shap_values, list):
-        shap_vals_employee = shap_values[1][emp_idx]  # Class 1 (attrition)
-        base_value = float(explainer.expected_value[1])
+    emp_idx = _shap_values_index_map[emp_id]
+    shap_vals_employee = _shap_values_cache[emp_idx]
+
+    expected_value = _shap_explainer.expected_value
+    if isinstance(expected_value, (list, tuple, np.ndarray)):
+        if len(expected_value) > 1:
+            base_value = float(expected_value[1])
+        else:
+            base_value = float(expected_value[0])
     else:
-        shap_vals_employee = shap_values[emp_idx, :, 1]
-        base_value = float(explainer.expected_value[1])
+        base_value = float(expected_value)
+    
+    # Préparer les données
+    X_employee = _prepare_model_frame(pd.DataFrame([row]))
     
     # Prédiction
     proba = float(model.predict_proba(X_employee)[:, 1][0])
     
     # Construire le waterfall
-    feature_names_encoded = X.columns.tolist()
+    feature_names_encoded = _encoded_columns
     waterfall_items = []
     
     # Top 12 features par impact SHAP
@@ -858,8 +899,8 @@ def hr_shap_explain(emp_id: int):
             "impact_percentage": round(abs(shap_value) / abs_shap.sum() * 100, 1),
         })
     
-    # Statistiques de comparaison
-    all_probas = model.predict_proba(X)[:, 1]
+    # Statistiques de comparaison (cached SHAP values)
+    all_probas = model.predict_proba(_prepare_model_frame(df))[:, 1]
     percentile = int((all_probas < proba).sum() / len(all_probas) * 100)
     
     return _json_safe({
@@ -910,6 +951,10 @@ def hr_recommendations(emp_id: int):
     
     Donne des actions concrètes basées sur les facteurs de risque pour réduire l'attrition.
     """
+    # Check cache first
+    if emp_id in _recommendations_cache:
+        return _recommendations_cache[emp_id]
+    
     df = _load_data()
     model, features = _get_model()
     
@@ -917,12 +962,38 @@ def hr_recommendations(emp_id: int):
     row = df[df["EmployeeNumber"] == emp_id]
     if row.empty:
         raise HTTPException(status_code=404, detail="Employé introuvable")
-    
+
+    row_index = int(row.index[0])
     row = row.iloc[0]
-    X = _prepare_model_frame(pd.DataFrame([row]))
-    proba = float(model.predict_proba(X)[:, 1][0])
+    X_all = _prepare_model_frame(df)
+    probas_all = model.predict_proba(X_all)[:, 1]
+    proba = float(probas_all[row_index])
     
     recommendations = []
+
+    def _priority_by_efficiency(efficiency: float):
+        if efficiency >= 1.9:
+            return "CRITIQUE"
+        if efficiency >= 1.4:
+            return "ÉLEVÉE"
+        if efficiency >= 1.0:
+            return "MODÉRÉE"
+        return "FAIBLE"
+
+    def _action_pack(area: str, current_value: str, target_value: str, actions: list[str], impact_range: tuple[float, float], cost_points: float):
+        impact_mid = (impact_range[0] + impact_range[1]) / 2.0
+        efficiency = impact_mid / max(cost_points, 0.1)
+        return {
+            "priority": _priority_by_efficiency(efficiency),
+            "area": area,
+            "current_value": current_value,
+            "target_value": target_value,
+            "actions": actions,
+            "estimated_risk_reduction_points": round(impact_mid, 1),
+            "estimated_cost_points": round(cost_points, 1),
+            "efficiency_score": round(efficiency, 2),
+            "expected_impact": f"↓ Réduction estimée de {impact_range[0]:.0f}-{impact_range[1]:.0f} points de risque",
+        }
     
     # Analyse des facteurs de risque et génération de recommandations
     job_satisfaction = float(row.get("JobSatisfaction", 0))
@@ -937,127 +1008,141 @@ def hr_recommendations(emp_id: int):
     
     # Recommandations basées sur les facteurs
     if job_satisfaction < 2.5:
-        recommendations.append({
-            "priority": "CRITIQUE",
-            "area": "Satisfaction professionnelle",
-            "current_value": f"{job_satisfaction}/4",
-            "target_value": "3.5+/4",
-            "actions": [
+        recommendations.append(_action_pack(
+            "Satisfaction professionnelle",
+            f"{job_satisfaction}/4",
+            "3.5+/4",
+            [
                 "Révision du contenu du travail et des responsabilités",
                 "Feedback constructif et reconnaissance des accomplissements",
                 "Projet enrichissant aligné avec les intérêts de l'employé",
                 "Entretien 1-on-1 pour comprendre les insatisfactions",
-                "Ajustement des conditions de travail si applicable",
             ],
-            "expected_impact": "↓ Réduction du risque d'attrition de 15-25%",
-        })
+            (15, 25),
+            3.0,
+        ))
     
     if job_involvement < 2.5:
-        recommendations.append({
-            "priority": "CRITIQUE",
-            "area": "Engagement et implication",
-            "current_value": f"{job_involvement}/4",
-            "target_value": "3+/4",
-            "actions": [
+        recommendations.append(_action_pack(
+            "Engagement et implication",
+            f"{job_involvement}/4",
+            "3+/4",
+            [
                 "Impliquer l'employé dans les décisions de l'équipe",
                 "Donner plus d'autonomie et de propriété sur les projets",
                 "Mentoring ou coaching personnalisé",
-                "Opportunités de leadership ou de contribution stratégique",
                 "Formation et développement des compétences",
             ],
-            "expected_impact": "↓ Réduction du risque d'attrition de 15-20%",
-        })
+            (15, 20),
+            2.8,
+        ))
     
     if work_life_balance < 2.5:
-        recommendations.append({
-            "priority": "ÉLEVÉE",
-            "area": "Équilibre vie-travail",
-            "current_value": f"{work_life_balance}/4",
-            "target_value": "3+/4",
-            "actions": [
+        recommendations.append(_action_pack(
+            "Équilibre vie-travail",
+            f"{work_life_balance}/4",
+            "3+/4",
+            [
                 "Réduire les heures de travail ou les surcharges",
                 "Télétravail flexible si applicable",
                 "Encourager les congés et pauses régulières",
                 "Examiner les charges de travail non essentielles" if overtime == "Yes" else "Prévenir le surmenage",
-                "Support d'aide à la gestion du stress (EAP, coaching)",
             ],
-            "expected_impact": "↓ Réduction du risque d'attrition de 10-15%",
-        })
+            (10, 15),
+            2.0,
+        ))
     
     if years_since_promotion >= 4:
-        recommendations.append({
-            "priority": "ÉLEVÉE",
-            "area": "Progression de carrière",
-            "current_value": f"Dernière promotion il y a {years_since_promotion:.0f} ans",
-            "target_value": "Promotion ou augmentation de responsabilités",
-            "actions": [
+        recommendations.append(_action_pack(
+            "Progression de carrière",
+            f"Dernière promotion il y a {years_since_promotion:.0f} ans",
+            "Promotion ou augmentation de responsabilités",
+            [
                 "Plan de développement de carrière avec jalons clairs",
-                "Promotion ou augmentation de responsabilités à court terme",
                 "Formation pour préparer le prochain rôle",
-                "Augmentation salariale si justifiée par la performance",
                 "Projets spéciaux ou initiatives d'entreprise",
             ],
-            "expected_impact": "↓ Réduction du risque d'attrition de 12-18%",
-        })
+            (12, 18),
+            3.4,
+        ))
     
     if environment_satisfaction < 2.5:
-        recommendations.append({
-            "priority": "MODÉRÉE",
-            "area": "Satisfaction de l'environnement",
-            "current_value": f"{environment_satisfaction}/4",
-            "target_value": "3+/4",
-            "actions": [
-                "Améliorer l'environnement physique (bureau, outils, localisation)",
+        recommendations.append(_action_pack(
+            "Satisfaction de l'environnement",
+            f"{environment_satisfaction}/4",
+            "3+/4",
+            [
                 "Retour d'information sur les conditions de travail",
                 "Implication dans l'amélioration de l'espace de travail",
                 "Flexibilité sur le lieu de travail si applicable",
             ],
-            "expected_impact": "↓ Réduction du risque d'attrition de 5-10%",
-        })
+            (5, 10),
+            1.6,
+        ))
     
     if distance_from_home > 25:
-        recommendations.append({
-            "priority": "MODÉRÉE",
-            "area": "Distance domicile-travail",
-            "current_value": f"{distance_from_home:.0f} km",
-            "target_value": "<20 km ou télétravail",
-            "actions": [
+        recommendations.append(_action_pack(
+            "Distance domicile-travail",
+            f"{distance_from_home:.0f} km",
+            "<20 km ou télétravail",
+            [
                 "Télétravail partiel ou complet si possible",
                 "Ajustement des horaires (heures creuses)",
-                "Indemnité de transport ou aide aux trajets",
                 "Opportunité de transfert vers un bureau plus proche",
             ],
-            "expected_impact": "↓ Réduction du risque d'attrition de 5-8%",
-        })
+            (5, 8),
+            1.4,
+        ))
     
     if monthly_income < df["MonthlyIncome"].quantile(0.3):
-        recommendations.append({
-            "priority": "MODÉRÉE",
-            "area": "Compensation et salaire",
-            "current_value": f"${monthly_income:.0f}",
-            "target_value": f">${df['MonthlyIncome'].quantile(0.4):.0f}+ (benchmarking secteur)",
-            "actions": [
+        recommendations.append(_action_pack(
+            "Compensation et salaire",
+            f"${monthly_income:.0f}",
+            f">${df['MonthlyIncome'].quantile(0.4):.0f}+ (benchmarking secteur)",
+            [
                 "Benchmark du salaire face au marché",
-                "Augmentation salariale si sous-payé par rapport au marché",
-                "Avantages supplémentaires (stock options, bonus)",
-                "Clarté sur les perspective de rémunération future",
+                "Ajustement salarial ciblé si sous-payé",
+                "Avantages supplémentaires (bonus / stock options)",
             ],
-            "expected_impact": "↓ Réduction du risque d'attrition de 8-12%",
-        })
+            (8, 12),
+            4.5,
+        ))
     
     # Si pas de facteurs de risque majeurs
     if not recommendations:
-        recommendations.append({
-            "priority": "FAIBLE",
-            "area": "Rétention générale",
-            "actions": [
+        recommendations.append(_action_pack(
+            "Rétention générale",
+            "Profil globalement stable",
+            "Maintien et prévention",
+            [
                 "Maintenir les conditions actuelles favorables",
-                "Check-in régulier pour s'assurer de la satisfaction continue",
-                "Opportunités de développement/ avancement",
+                "Check-in régulier de satisfaction",
                 "Reconnaissance et feedback positifs",
             ],
-            "expected_impact": "Status quo - L'employé semble satisfait",
-        })
+            (2, 4),
+            0.9,
+        ))
+
+    risk_scale = 1.15 if proba >= 0.65 else 1.0
+    for item in recommendations:
+        item["estimated_risk_reduction_points"] = round(item["estimated_risk_reduction_points"] * risk_scale, 1)
+        item["efficiency_score"] = round(item["estimated_risk_reduction_points"] / max(item["estimated_cost_points"], 0.1), 2)
+        item["priority"] = _priority_by_efficiency(item["efficiency_score"])
+
+    optimized_sorted = sorted(
+        recommendations,
+        key=lambda action: (action["efficiency_score"], action["estimated_risk_reduction_points"]),
+        reverse=True,
+    )
+
+    optimized_plan = []
+    cumulative_cost = 0.0
+    cumulative_reduction = 0.0
+    for action in optimized_sorted:
+        if cumulative_cost + action["estimated_cost_points"] <= 7.0 or len(optimized_plan) < 2:
+            optimized_plan.append(action)
+            cumulative_cost += action["estimated_cost_points"]
+            cumulative_reduction += action["estimated_risk_reduction_points"]
     
     return _json_safe({
         "emp_id": int(row["EmployeeNumber"]),
@@ -1065,10 +1150,17 @@ def hr_recommendations(emp_id: int):
         "current_risk_score": round(proba, 3),
         "risk_level": "Critique" if proba > 0.7 else "Élevé" if proba > 0.5 else "Modéré" if proba > 0.3 else "Faible",
         "recommendations": recommendations,
+        "optimized_plan": {
+            "budget_cost_points": 7.0,
+            "recommended_actions": optimized_plan,
+            "total_estimated_cost_points": round(cumulative_cost, 1),
+            "total_estimated_risk_reduction_points": round(cumulative_reduction, 1),
+            "expected_new_risk_score": round(max(0.0, proba - (cumulative_reduction / 100.0)), 3),
+        },
         "action_plan_template": {
             "immediate_actions": [r for r in recommendations if r["priority"] == "CRITIQUE"],
             "short_term_plan": [r for r in recommendations if r["priority"] in ["CRITIQUE", "ÉLEVÉE"]],
             "ongoing_monitoring": "Suivi mensuel de la satisfaction et de l'engagement",
         },
-        "projected_impact": f"Si toutes les recommendations sont appliquées, réduction potentielle du risque de {round((proba - 0.2) * 100, 1)}% (cible: <0.2 risque)",
+        "projected_impact": f"Plan optimisé coût/impact: réduction estimée de {round(cumulative_reduction, 1)} points de risque pour un coût total {round(cumulative_cost, 1)}.",
     })

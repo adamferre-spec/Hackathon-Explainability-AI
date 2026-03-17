@@ -17,7 +17,6 @@ from model.bias_mitigation import BiasAuditor, BiasCorrector
 from model.anomaly_detection import AnomalyDetector, EarlyWarningSystem
 from model.simulation import WhatIfSimulator, TemporalAnalyzer
 from model.career_development import get_career_engine, initialize_career_engine
-from model.hr_chatbot import get_hr_chatbot, initialize_chatbot
 from model.attrition_timeline import get_timeline_model, initialize_timeline_model
 
 
@@ -31,12 +30,11 @@ _simulator = None
 _temporal_analyzer = None
 _career_engine = None
 _timeline_model = None
-_chatbot = None
 
 
 def _init_advanced_modules():
     """Initialize models on first use."""
-    global _counterfactual_explainer, _bias_auditor, _anomaly_detector, _simulator, _temporal_analyzer, _career_engine, _timeline_model, _chatbot
+    global _counterfactual_explainer, _bias_auditor, _anomaly_detector, _simulator, _temporal_analyzer, _career_engine, _timeline_model
 
     if (
         _counterfactual_explainer is not None
@@ -46,7 +44,6 @@ def _init_advanced_modules():
         and _temporal_analyzer is not None
         and _career_engine is not None
         and _timeline_model is not None
-        and _chatbot is not None
     ):
         return
 
@@ -85,9 +82,6 @@ def _init_advanced_modules():
         _timeline_model = get_timeline_model()
         if df is not None and not df.empty:
             _timeline_model.train(df)
-
-    if _chatbot is None:
-        _chatbot = initialize_chatbot(df)
 
 
 # ──────────────────────────────────────────────────────────────────
@@ -522,79 +516,6 @@ def _interpret_timeline(timeline: Dict, attrition_prob: Optional[float]) -> str:
         return f"🟡 MODERATE RISK: Potential departure in ~{months:.0f} months. Proactive career planning recommended."
     else:
         return f"🟢 LOW RISK: Stable tenure expected. Continue engagement initiatives."
-
-
-# ──────────────────────────────────────────────────────────────────
-# 8. HR AI CHATBOT
-# ──────────────────────────────────────────────────────────────────
-
-class ChatMessage(BaseModel):
-    message: str
-    emp_id: Optional[int] = None
-
-
-@router.post("/advanced/chat")
-def hr_chat(chat: ChatMessage):
-    """    
-    💬 HR AI CHATBOT: Intelligent assistant for HR questions and insights.
-    
-    Understands natural language queries and provides data-driven recommendations:
-    - Attrition risk analysis
-    - Retention strategies  
-    - Top performer identification
-    - Promotion readiness
-    - Salary insights
-    - Department analysis
-    
-    NOT just pre-programmed responses - uses intent matching and context awareness.
-    """
-    message = chat.message.strip()
-    if not message:
-        raise HTTPException(status_code=400, detail="Message cannot be empty")
-    
-    _init_advanced_modules()
-    
-    # Get chat response
-    response = _chatbot.process_message(message)
-    
-    _create_audit_log(chat.emp_id or 0, "CHATBOT_QUERY", -1)
-    
-    return {
-        'timestamp': datetime.utcnow().isoformat(),
-        'message': message,
-        'response': response.get('response', ''),
-        'insights': response.get('insights', []),
-        'recommendations': response.get('recommendations', []),
-        'intent': response.get('intent', ''),
-        'confidence': response.get('confidence', 0),
-        'conversation_length': len(_chatbot.conversation_history)
-    }
-
-
-@router.get("/advanced/chat/suggestions")
-def chat_suggestions():
-    """    
-    💡 CHAT SUGGESTIONS: Get example questions for the chatbot.
-    
-    Helps users understand what questions they can ask.
-    """
-    suggestions = [
-        "Who is at high risk of leaving?",
-        "What's our attrition rate?",
-        "How do I retain top talent?",
-        "Show me top performers",
-        "Salary analysis - are we competitive?",
-        "Which department has the most attrition?",
-        "How ready are employees for promotion?",
-        "What retention strategies work best?",
-        "Tell me about employee #1234",
-    ]
-    
-    return {
-        'timestamp': datetime.utcnow().isoformat(),
-        'suggestions': suggestions,
-        'message': 'Try asking the HR Chatbot any of these questions. It understands natural language queries!'
-    }
 
 
 def _get_trend_recommendation(trends: Dict) -> str:
