@@ -1,0 +1,25 @@
+{
+  "f1": 0.2941,
+  "auc_roc": 0.7881,
+  "confusion_matrix": [
+    [
+      236,
+      11
+    ],
+    [
+      37,
+      10
+    ]
+  ],
+  "test_size": 294,
+  "train_size": 1176,
+  "positive_rate": 0.1612,
+  "model": {
+    "name": "RandomForestClassifier",
+    "n_estimators": 400,
+    "max_depth": 15,
+    "min_samples_leaf": 3,
+    "class_weight": "balanced",
+    "random_state": 42
+  }
+}

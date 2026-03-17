@@ -410,6 +410,140 @@ function ChatAssistant({ selectedEmpId, employees }) {
   );
 }
 
+function ShapExplainerPanel({ shap }) {
+  if (!shap?.waterfall) return null;
+  
+  const { waterfall } = shap;
+  const factors = waterfall.factors || [];
+  const topFactors = factors.slice(0, 8);
+  
+  return (
+    <div style={{ background: "#1B2E45", borderRadius: 10, overflow: "hidden" }}>
+      <div style={{ padding: "14px 20px", borderBottom: "1px solid #243B55", color: "#FFFFFF", fontWeight: 600, fontSize: 14 }}>
+        🔍 SHAP Waterfall — {shap.name}
+      </div>
+      <div style={{ padding: 16, display: "flex", flexDirection: "column", gap: 14 }}>
+        <div style={{ background: "#243B55", borderRadius: 8, padding: 10 }}>
+          <div style={{ color: "#8BA5BF", fontSize: 11, marginBottom: 4 }}>Base Value (probabilité sans facteurs)</div>
+          <div style={{ color: "#C5D5E8", fontSize: 12, fontWeight: 600 }}>{(waterfall.base_value * 100).toFixed(2)}%</div>
+          <div style={{ color: "#A7C7E7", fontSize: 10, marginTop: 6 }}>↓ Influence des facteurs individuels ↓</div>
+          <div style={{ height: 2, background: `linear-gradient(90deg, #378ADD, #00C9A7)`, borderRadius: 1, margin: "6px 0" }} />
+          <div style={{ color: "#C5D5E8", fontSize: 12, fontWeight: 600, marginTop: 6 }}>Prédiction: {(waterfall.final_prediction * 100).toFixed(2)}%</div>
+          <div style={{ color: "#8BA5BF", fontSize: 10, marginTop: 2 }}>Δ = {(waterfall.delta_from_base > 0 ? "+" : "")}{(waterfall.delta_from_base * 100).toFixed(2)}%</div>
+        </div>
+
+        <div>
+          <div style={{ color: "#8BA5BF", fontSize: 11, marginBottom: 8, fontWeight: 600 }}>Impact des variables principales</div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+            {topFactors.map((f) => {
+              const isRisk = f.shap_value > 0;
+              const color = isRisk ? "#E63946" : "#00C9A7";
+              return (
+                <div key={f.feature} style={{ background: "#243B55", borderRadius: 6, padding: "8px 10px", borderLeft: `3px solid ${color}` }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 3 }}>
+                    <span style={{ color: "#FFFFFF", fontSize: 11, fontWeight: 600 }}>{f.feature}</span>
+                    <span style={{ color, fontSize: 11, fontWeight: 700 }}>{isRisk ? "↑" : "↓"} {(Math.abs(f.shap_value) * 100).toFixed(2)}%</span>
+                  </div>
+                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: 10, color: "#8BA5BF" }}>
+                    <span>Valeur: {f.value?.toFixed ? f.value.toFixed(2) : f.value}</span>
+                    <span>{f.impact_percentage}% du total</span>
+                  </div>
+                  <div style={{ height: 4, background: "#0D1B2A", borderRadius: 2, marginTop: 4 }}>
+                    <div style={{ height: "100%", width: `${f.impact_percentage}%`, background: color, borderRadius: 2 }} />
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
+        {shap.interpretation?.high_risk_factors?.length > 0 ? (
+          <div style={{ background: "#E639464C", border: "1px solid #E63946", borderRadius: 8, padding: 10 }}>
+            <div style={{ color: "#FF9F9F", fontSize: 11, fontWeight: 600, marginBottom: 4 }}>🔴 Facteurs aggravants</div>
+            <div style={{ color: "#FFD9D9", fontSize: 10 }}>
+              {shap.interpretation.high_risk_factors.join(", ")}
+            </div>
+          </div>
+        ) : null}
+
+        {shap.interpretation?.protective_factors?.length > 0 ? (
+          <div style={{ background: "#00C9A74C", border: "1px solid #00C9A7", borderRadius: 8, padding: 10 }}>
+            <div style={{ color: "#7FFBDB", fontSize: 11, fontWeight: 600, marginBottom: 4 }}>🟢 Facteurs protecteurs</div>
+            <div style={{ color: "#D1F5EB", fontSize: 10 }}>
+              {shap.interpretation.protective_factors.join(", ")}
+            </div>
+          </div>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+function RecommendationsPanel({ recommendations }) {
+  if (!recommendations?.recommendations) return null;
+  
+  const recs = recommendations.recommendations;
+  
+  return (
+    <div style={{ background: "#1B2E45", borderRadius: 10, overflow: "hidden" }}>
+      <div style={{ padding: "14px 20px", borderBottom: "1px solid #243B55", color: "#FFFFFF", fontWeight: 600, fontSize: 14 }}>
+        💡 Recommandations personnalisées — {recommendations.name}
+      </div>
+      <div style={{ padding: 16, display: "flex", flexDirection: "column", gap: 14, maxHeight: 600, overflowY: "auto" }}>
+        <div style={{ background: "#243B55", borderRadius: 8, padding: 10 }}>
+          <div style={{ color: "#8BA5BF", fontSize: 10, marginBottom: 4 }}>Risque actuel</div>
+          <div style={{ color: riskColor(recommendations.current_risk_score), fontSize: 14, fontWeight: 700 }}>
+            {recommendations.risk_level} • {(recommendations.current_risk_score * 100).toFixed(1)}%
+          </div>
+          <div style={{ color: "#8BA5BF", fontSize: 10, marginTop: 6 }}>
+            {recommendations.projected_impact}
+          </div>
+        </div>
+
+        {recs.map((rec, i) => {
+          const priorityColors = {
+            "CRITIQUE": { bg: "#E639464C", border: "#E63946", text: "#FF9F9F" },
+            "ÉLEVÉE": { bg: "#FF9F1C4C", border: "#FF9F1C", text: "#FFD499" },
+            "MODÉRÉE": { bg: "#A855F74C", border: "#A855F7", text: "#DCC9FF" },
+            "FAIBLE": { bg: "#00C9A74C", border: "#00C9A7", text: "#7FFBDB" },
+          };
+          const colors = priorityColors[rec.priority] || priorityColors["MODÉRÉE"];
+          
+          return (
+            <div key={i} style={{ background: colors.bg, border: `1px solid ${colors.border}`, borderRadius: 8, padding: 10 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+                <div style={{ color: colors.text, fontSize: 12, fontWeight: 700 }}>{rec.priority}</div>
+                {rec.area && <div style={{ color: "#C5D5E8", fontSize: 11, fontWeight: 600 }}>{rec.area}</div>}
+              </div>
+              
+              {rec.current_value && (
+                <div style={{ color: "#8BA5BF", fontSize: 10, marginBottom: 4 }}>
+                  {rec.current_value} → {rec.target_value}
+                </div>
+              )}
+              
+              <div style={{ color: "#C5D5E8", fontSize: 11, marginBottom: 6 }}>
+                <strong>Actions:</strong>
+                <ul style={{ margin: "4px 0 0 16px", padding: 0, listStyle: "none" }}>
+                  {rec.actions?.slice(0, 3).map((action, j) => (
+                    <li key={j} style={{ marginBottom: 2, fontSize: 10 }}>• {action}</li>
+                  ))}
+                </ul>
+              </div>
+              
+              {rec.expected_impact && (
+                <div style={{ color: colors.text, fontSize: 10, fontStyle: "italic" }}>
+                  {rec.expected_impact}
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 function ModelPerformanceTab({ employees }) {
   const metrics = useMemo(() => {
     let tp = 0;
@@ -859,6 +993,8 @@ export default function HRAttritionV2() {
   const [terminationReasons, setTerminationReasons] = useState(null);
   const [selected, setSelected] = useState(null);
   const [detailLoading, setDetailLoading] = useState(false);
+  const [shap, setShap] = useState(null);
+  const [recommendations, setRecommendations] = useState(null);
   const [activeOnly, setActiveOnly] = useState(true);
   const [statusFilter, setStatusFilter] = useState("all");
   const [departmentFilter, setDepartmentFilter] = useState("all");
@@ -934,9 +1070,17 @@ export default function HRAttritionV2() {
 
   async function handleSelect(employee) {
     setDetailLoading(true);
+    setShap(null);
+    setRecommendations(null);
     try {
-      const detail = await api.hrPredict(employee.emp_id);
+      const [detail, shapData, recsData] = await Promise.all([
+        api.hrPredict(employee.emp_id),
+        api.hrShapExplain(employee.emp_id),
+        api.hrRecommendations(employee.emp_id),
+      ]);
       setSelected(detail);
+      setShap(shapData);
+      setRecommendations(recsData);
     } catch (err) {
       setError(`Employee detail failed: ${err.message}`);
     } finally {
@@ -1009,6 +1153,13 @@ export default function HRAttritionV2() {
           </div>
 
           <div>{detailLoading ? <div style={{ color: "#8BA5BF", padding: 12 }}>Chargement détail employé...</div> : <EmployeeFocus detail={selected} />}</div>
+
+          {selected && (
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 18 }}>
+              <ShapExplainerPanel shap={shap} />
+              <RecommendationsPanel recommendations={recommendations} />
+            </div>
+          )}
         </>
       ) : null}
 

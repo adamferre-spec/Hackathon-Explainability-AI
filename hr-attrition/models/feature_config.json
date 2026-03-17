@@ -1,0 +1,41 @@
+{
+  "continuous": [
+    "DailyRate",
+    "DistanceFromHome",
+    "HourlyRate",
+    "MonthlyIncome",
+    "MonthlyRate",
+    "NumCompaniesWorked",
+    "PercentSalaryHike",
+    "TotalWorkingYears",
+    "TrainingTimesLastYear",
+    "YearsAtCompany",
+    "YearsInCurrentRole",
+    "YearsSinceLastPromotion",
+    "YearsWithCurrManager"
+  ],
+  "ordinal": [
+    "Education",
+    "EnvironmentSatisfaction",
+    "JobInvolvement",
+    "JobLevel",
+    "JobSatisfaction",
+    "PerformanceRating",
+    "RelationshipSatisfaction",
+    "StockOptionLevel",
+    "WorkLifeBalance"
+  ],
+  "categorical": [
+    "BusinessTravel",
+    "Department",
+    "EducationField",
+    "JobRole",
+    "MaritalStatus",
+    "AgeGroup",
+    "OverTime"
+  ],
+  "sensitive_excluded": [
+    "Gender"
+  ],
+  "target": "Attrition"
+}

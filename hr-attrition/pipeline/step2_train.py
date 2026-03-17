@@ -152,9 +152,9 @@ def main() -> None:
     )
 
     classifier = RandomForestClassifier(
-        n_estimators=200,
-        max_depth=10,
-        min_samples_leaf=5,
+        n_estimators=400,
+        max_depth=15,
+        min_samples_leaf=3,
         class_weight="balanced",
         random_state=42,
         n_jobs=-1,
@@ -219,9 +219,9 @@ def main() -> None:
         "positive_rate": round(float(y.mean()), 4),
         "model": {
             "name": "RandomForestClassifier",
-            "n_estimators": 200,
-            "max_depth": 10,
-            "min_samples_leaf": 5,
+            "n_estimators": 400,
+            "max_depth": 15,
+            "min_samples_leaf": 3,
             "class_weight": "balanced",
             "random_state": 42,
         },

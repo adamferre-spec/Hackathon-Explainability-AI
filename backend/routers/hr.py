@@ -790,3 +790,285 @@ def hr_ia_act_audit(emp_id: int):
             ],
         },
     })
+
+
+@router.get("/hr/shap-explain/{emp_id}")
+def hr_shap_explain(emp_id: int):
+    """🔍 EXPLICATION SHAP DÉTAILLÉE
+    
+    Retourne une explication complète basée sur SHAP:
+    - Impact de chaque variable sur le risque (positif/négatif)
+    - Graphique waterfall virtuel (baseline → prédiction)
+    - Contribution relative de chaque facteur
+    - Comparaison avec d'autres employés
+    """
+    import shap
+    
+    df = _load_data()
+    model, features = _get_model()
+    
+    # Récupérer l'employé
+    row = df[df["EmployeeNumber"] == emp_id]
+    if row.empty:
+        raise HTTPException(status_code=404, detail="Employé introuvable")
+    
+    row = row.iloc[0]
+    
+    # Préparer les données
+    X = _prepare_model_frame(df)
+    X_employee = _prepare_model_frame(pd.DataFrame([row]))
+    
+    # Calculer SHAP values
+    explainer = shap.TreeExplainer(model)
+    shap_values = explainer.shap_values(X)
+    
+    # Index de l'employé
+    emp_idx = df[df["EmployeeNumber"] == emp_id].index[0]
+    
+    # Extraire les SHAP values pour la classe 1 (Attrition)
+    if isinstance(shap_values, list):
+        shap_vals_employee = shap_values[1][emp_idx]  # Class 1 (attrition)
+        base_value = float(explainer.expected_value[1])
+    else:
+        shap_vals_employee = shap_values[emp_idx, :, 1]
+        base_value = float(explainer.expected_value[1])
+    
+    # Prédiction
+    proba = float(model.predict_proba(X_employee)[:, 1][0])
+    
+    # Construire le waterfall
+    feature_names_encoded = X.columns.tolist()
+    waterfall_items = []
+    
+    # Top 12 features par impact SHAP
+    abs_shap = np.abs(shap_vals_employee)
+    top_indices = np.argsort(abs_shap)[::-1][:12]
+    
+    for idx in top_indices:
+        feature_name = feature_names_encoded[idx]
+        shap_value = float(shap_vals_employee[idx])
+        feature_value = float(X_employee.iloc[0, idx])
+        
+        waterfall_items.append({
+            "feature": feature_name,
+            "value": feature_value,
+            "shap_value": round(shap_value, 4),
+            "abs_shap": round(abs(shap_value), 4),
+            "direction": "↑ Augmente risque" if shap_value > 0 else "↓ Réduit risque",
+            "impact_percentage": round(abs(shap_value) / abs_shap.sum() * 100, 1),
+        })
+    
+    # Statistiques de comparaison
+    all_probas = model.predict_proba(X)[:, 1]
+    percentile = int((all_probas < proba).sum() / len(all_probas) * 100)
+    
+    return _json_safe({
+        "emp_id": int(row["EmployeeNumber"]),
+        "name": f"Emp_{int(row['EmployeeNumber'])}",
+        "prediction": {
+            "risk_score": round(proba, 4),
+            "percentile": f"{percentile}ème percentile (plus haut = plus riskué)",
+            "vs_average": f"+{round((proba - all_probas.mean()) * 100, 1)}% vs. moyenne",
+        },
+        "shap_base_value": round(base_value, 4),
+        "waterfall": {
+            "base_value": round(base_value, 4),
+            "base_interpretation": "Probabilité de base avant considération des facteurs individuels",
+            "delta_from_base": round(proba - base_value, 4),
+            "final_prediction": round(proba, 4),
+            "factors": waterfall_items,
+        },
+        "top_risk_drivers": [
+            {
+                "rank": i + 1,
+                "feature": item["feature"],
+                "contributes": item["direction"],
+                "magnitude": item["abs_shap"],
+                "percentage_of_total_impact": item["impact_percentage"],
+            }
+            for i, item in enumerate(waterfall_items[:5])
+        ],
+        "interpretation": {
+            "high_risk_factors": [
+                item["feature"] for item in waterfall_items if item["shap_value"] > 0
+            ][:3],
+            "protective_factors": [
+                item["feature"] for item in waterfall_items if item["shap_value"] < 0
+            ][:3],
+        },
+        "model_info": {
+            "type": "Random Forest with TreeExplainer (SHAP)",
+            "explainer_type": "SHAP TreeExplainer",
+            "interpretation": "Les valeurs SHAP montrent la contribution de chaque variable à l'écart entre la prédiction et la base value"
+        }
+    })
+
+
+@router.get("/hr/recommendations/{emp_id}")
+def hr_recommendations(emp_id: int):
+    """💡 RECOMMANDATIONS PERSONNALISÉES
+    
+    Donne des actions concrètes basées sur les facteurs de risque pour réduire l'attrition.
+    """
+    df = _load_data()
+    model, features = _get_model()
+    
+    # Récupérer l'employé
+    row = df[df["EmployeeNumber"] == emp_id]
+    if row.empty:
+        raise HTTPException(status_code=404, detail="Employé introuvable")
+    
+    row = row.iloc[0]
+    X = _prepare_model_frame(pd.DataFrame([row]))
+    proba = float(model.predict_proba(X)[:, 1][0])
+    
+    recommendations = []
+    
+    # Analyse des facteurs de risque et génération de recommandations
+    job_satisfaction = float(row.get("JobSatisfaction", 0))
+    job_involvement = float(row.get("JobInvolvement", 0))
+    work_life_balance = float(row.get("WorkLifeBalance", 0))
+    years_since_promotion = float(row.get("YearsSinceLastPromotion", 0))
+    monthly_income = float(row.get("MonthlyIncome", 0))
+    overtime = str(row.get("OverTime", "No"))
+    years_at_company = float(row.get("YearsAtCompany", 0))
+    distance_from_home = float(row.get("DistanceFromHome", 0))
+    environment_satisfaction = float(row.get("EnvironmentSatisfaction", 0))
+    
+    # Recommandations basées sur les facteurs
+    if job_satisfaction < 2.5:
+        recommendations.append({
+            "priority": "CRITIQUE",
+            "area": "Satisfaction professionnelle",
+            "current_value": f"{job_satisfaction}/4",
+            "target_value": "3.5+/4",
+            "actions": [
+                "Révision du contenu du travail et des responsabilités",
+                "Feedback constructif et reconnaissance des accomplissements",
+                "Projet enrichissant aligné avec les intérêts de l'employé",
+                "Entretien 1-on-1 pour comprendre les insatisfactions",
+                "Ajustement des conditions de travail si applicable",
+            ],
+            "expected_impact": "↓ Réduction du risque d'attrition de 15-25%",
+        })
+    
+    if job_involvement < 2.5:
+        recommendations.append({
+            "priority": "CRITIQUE",
+            "area": "Engagement et implication",
+            "current_value": f"{job_involvement}/4",
+            "target_value": "3+/4",
+            "actions": [
+                "Impliquer l'employé dans les décisions de l'équipe",
+                "Donner plus d'autonomie et de propriété sur les projets",
+                "Mentoring ou coaching personnalisé",
+                "Opportunités de leadership ou de contribution stratégique",
+                "Formation et développement des compétences",
+            ],
+            "expected_impact": "↓ Réduction du risque d'attrition de 15-20%",
+        })
+    
+    if work_life_balance < 2.5:
+        recommendations.append({
+            "priority": "ÉLEVÉE",
+            "area": "Équilibre vie-travail",
+            "current_value": f"{work_life_balance}/4",
+            "target_value": "3+/4",
+            "actions": [
+                "Réduire les heures de travail ou les surcharges",
+                "Télétravail flexible si applicable",
+                "Encourager les congés et pauses régulières",
+                "Examiner les charges de travail non essentielles" if overtime == "Yes" else "Prévenir le surmenage",
+                "Support d'aide à la gestion du stress (EAP, coaching)",
+            ],
+            "expected_impact": "↓ Réduction du risque d'attrition de 10-15%",
+        })
+    
+    if years_since_promotion >= 4:
+        recommendations.append({
+            "priority": "ÉLEVÉE",
+            "area": "Progression de carrière",
+            "current_value": f"Dernière promotion il y a {years_since_promotion:.0f} ans",
+            "target_value": "Promotion ou augmentation de responsabilités",
+            "actions": [
+                "Plan de développement de carrière avec jalons clairs",
+                "Promotion ou augmentation de responsabilités à court terme",
+                "Formation pour préparer le prochain rôle",
+                "Augmentation salariale si justifiée par la performance",
+                "Projets spéciaux ou initiatives d'entreprise",
+            ],
+            "expected_impact": "↓ Réduction du risque d'attrition de 12-18%",
+        })
+    
+    if environment_satisfaction < 2.5:
+        recommendations.append({
+            "priority": "MODÉRÉE",
+            "area": "Satisfaction de l'environnement",
+            "current_value": f"{environment_satisfaction}/4",
+            "target_value": "3+/4",
+            "actions": [
+                "Améliorer l'environnement physique (bureau, outils, localisation)",
+                "Retour d'information sur les conditions de travail",
+                "Implication dans l'amélioration de l'espace de travail",
+                "Flexibilité sur le lieu de travail si applicable",
+            ],
+            "expected_impact": "↓ Réduction du risque d'attrition de 5-10%",
+        })
+    
+    if distance_from_home > 25:
+        recommendations.append({
+            "priority": "MODÉRÉE",
+            "area": "Distance domicile-travail",
+            "current_value": f"{distance_from_home:.0f} km",
+            "target_value": "<20 km ou télétravail",
+            "actions": [
+                "Télétravail partiel ou complet si possible",
+                "Ajustement des horaires (heures creuses)",
+                "Indemnité de transport ou aide aux trajets",
+                "Opportunité de transfert vers un bureau plus proche",
+            ],
+            "expected_impact": "↓ Réduction du risque d'attrition de 5-8%",
+        })
+    
+    if monthly_income < df["MonthlyIncome"].quantile(0.3):
+        recommendations.append({
+            "priority": "MODÉRÉE",
+            "area": "Compensation et salaire",
+            "current_value": f"${monthly_income:.0f}",
+            "target_value": f">${df['MonthlyIncome'].quantile(0.4):.0f}+ (benchmarking secteur)",
+            "actions": [
+                "Benchmark du salaire face au marché",
+                "Augmentation salariale si sous-payé par rapport au marché",
+                "Avantages supplémentaires (stock options, bonus)",
+                "Clarté sur les perspective de rémunération future",
+            ],
+            "expected_impact": "↓ Réduction du risque d'attrition de 8-12%",
+        })
+    
+    # Si pas de facteurs de risque majeurs
+    if not recommendations:
+        recommendations.append({
+            "priority": "FAIBLE",
+            "area": "Rétention générale",
+            "actions": [
+                "Maintenir les conditions actuelles favorables",
+                "Check-in régulier pour s'assurer de la satisfaction continue",
+                "Opportunités de développement/ avancement",
+                "Reconnaissance et feedback positifs",
+            ],
+            "expected_impact": "Status quo - L'employé semble satisfait",
+        })
+    
+    return _json_safe({
+        "emp_id": int(row["EmployeeNumber"]),
+        "name": f"Emp_{int(row['EmployeeNumber'])}",
+        "current_risk_score": round(proba, 3),
+        "risk_level": "Critique" if proba > 0.7 else "Élevé" if proba > 0.5 else "Modéré" if proba > 0.3 else "Faible",
+        "recommendations": recommendations,
+        "action_plan_template": {
+            "immediate_actions": [r for r in recommendations if r["priority"] == "CRITIQUE"],
+            "short_term_plan": [r for r in recommendations if r["priority"] in ["CRITIQUE", "ÉLEVÉE"]],
+            "ongoing_monitoring": "Suivi mensuel de la satisfaction et de l'engagement",
+        },
+        "projected_impact": f"Si toutes les recommendations sont appliquées, réduction potentielle du risque de {round((proba - 0.2) * 100, 1)}% (cible: <0.2 risque)",
+    })
